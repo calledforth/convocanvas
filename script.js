@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const apiKey = "a9c9ed4ede724626a6bfddff2c717817";  
     const apiVersion = "2024-10-01-preview";  
     const model = "gpt-4o-mini";  
-    const IMAGE_GENERATION_URL = "image-generation-trigger.azurewebsites.net/api/httpTrigger";  
+    const IMAGE_GENERATION_URL = "image-generation-trigger.azurewebsites.net/api/httpTriggerts";  
   
     let messages = [];  
     let finalPrompt = null;  
