@@ -887,3 +887,50 @@ body::before {
     text-decoration: none;
     cursor: pointer;
 }
+
+/* Modal for enlarged image view */
+#image-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.9);
+}
+
+#image-modal .modal-content {
+    background-color: #333;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    color: white;
+    text-align: center;
+}
+
+#image-modal .modal-actions {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+#image-modal .modal-actions a,
+#image-modal .modal-actions button {
+    background-color: #444;
+    color: white;
+    padding: 10px 20px;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    border-radius: 5px;
+}
+
+#image-modal .modal-actions a:hover,
+#image-modal .modal-actions button:hover {
+    background-color: #555;
+}

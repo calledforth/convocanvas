@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const apiKey = "a9c9ed4ede724626a6bfddff2c717817";  
     const apiVersion = "2024-10-01-preview";  
     const model = "gpt-4o-mini";  
-    const IMAGE_GENERATION_URL = "image-generation-trigger.azurewebsites.net/api/httpTriggerts";  
+    const IMAGE_GENERATION_URL = "http://image-generation-trigger.azurewebsites.net/api/httpTriggerts";   
   
     let messages = [];  
     let finalPrompt = null;  
@@ -25,6 +25,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let awaitingImageExplanation = false;  
     let dynamicChatActive = false;  
     let dynamicChatQuestionCount = 0;  
+    let awaitingPromptCombination = false; // Tracks if the user wants to combine prompts  
+    let awaitingCombinationMethod = false;
+    let awaitingUserPrompt = false;
+    let hasAskedPromptCombination = false;
   
     const QUESTION_TOPICS = ["colors", "textures", "shapes", "lighting", "depth", "style"];  
     const promptCache = new Map();  // Cache to store loaded prompts  
@@ -84,9 +88,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   
     function selectPrompt(promptDescription) {  
         selectedPrompt = promptDescription;  
-        addMessage("assistant", `Selected prompt: "${promptDescription}". How would you like to alter this prompt?`);  
-        awaitingFollowupResponse = true;  
-    }  
+        addMessage("assistant", `Selected prompt: "${promptDescription}". Combining it with the current prompt...`);  
+        awaitingPromptCombination = false;  
+      
+        // Combine the selected prompt with the current final prompt and generate the image  
+        combineAndGenerateImage(finalPrompt, selectedPrompt);  
+    }
+
+    async function combineAndGenerateImage(originalPrompt, selectedPrompt) {
+        showLoader();
+        const combinedPrompt = await combinePrompts(originalPrompt, selectedPrompt);
+        hideLoader();
+        if (combinedPrompt && !combinedPrompt.includes("Failed")) {
+            finalPrompt = combinedPrompt;
+            addMessage("assistant", `Updated Final Prompt: ${finalPrompt}`, true);
+            generateAndDisplayImage(finalPrompt);
+        } else {
+            addMessage("assistant", "Failed to combine prompts.");
+        }
+    }
   
     function openModal(imgSrc) {  
         modal.style.display = 'block';  
@@ -101,28 +121,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     function addMessage(role, content, isHTML = false) {  
         const messageElement = document.createElement('div');  
         messageElement.className = role === "user" ? 'message user-message' : 'message assistant-message';  
-  
+      
         const messageContent = document.createElement('div');  
         messageContent.className = 'message-content';  
-  
+      
         if (isHTML) {  
             messageContent.innerHTML = content;  
         } else {  
             messageContent.textContent = content;  
         }  
-  
+      
         if (role === "assistant") {  
             const icon = document.createElement('i');  
             icon.className = 'fa-solid fa-palette message-icon';  
             messageElement.appendChild(icon);  
         }  
-  
+      
         messageElement.appendChild(messageContent);  
         chatWindow.appendChild(messageElement);  
         chatWindow.scrollTop = chatWindow.scrollHeight;  
-  
+      
         messages.push({ role, content });  
-    }  
+    }
   
     function showLoader() {  
         const loaderElement = document.createElement('div');  
@@ -194,33 +214,104 @@ document.addEventListener('DOMContentLoaded', async () => {
         }  
     }  
   
-    function sendMessage() {  
-        const message = userInput.value.trim();  
-        if (message) {  
-            addMessage("user", message);  
-            showLoader();  
-  
-            if (awaitingImageExplanation) {  
-                handleImageExplanation(message);  
-            } else if (awaitingFollowupResponse && selectedPrompt) {  
-                handlePromptFollowup(message);  
-            } else if (finalPrompt) {  
-                handleDirectPromptModification(message);  
-            } else if (directImageGenerationCheckbox.checked) {  
-                // Direct image generation if the checkbox is checked  
-                const conversationHistory = messages.map(msg => `${msg.role}: ${msg.content}`).join('\n');  
-                const prompt = `Based on the user's input "${message}" and our conversation "${conversationHistory}", generate a highly detailed and visually stunning image. Ensure the prompt incorporates vibrant and harmonious colors, diverse textures (smooth, rough, glossy), a blend of geometric and organic shapes, dynamic lighting with clear shadows and highlights, a strong sense of depth and perspective, and a well-defined artistic style, such as abstract or realism, to achieve exceptional graphical brilliance.`;  
-  
-                addMessage("assistant", `Quick Mode Active`, true);  
-                generateAndDisplayImage(prompt);  
-            } else if (dynamicChatActive || dynamicChatQuestionCount < 6) {  
-                handleDynamicChat(message);  
-            }  
-  
-            userInput.value = '';  
-            hideLoader();  
-        }  
-    }  
+    async function sendMessage() {
+        const message = userInput.value.trim();
+        if (message) {
+            addMessage("user", message);
+            showLoader();
+            if (awaitingPromptCombination) {
+                // Use LLM to interpret user's response for combining prompts
+                const interpretation = await interpretResponse(message);
+                if (interpretation === 'yes') {
+                    awaitingPromptCombination = false;
+                    addMessage("assistant", "How do you want to combine? Combine with prompt from prompt library or by inputting your own prompt?");
+                    awaitingCombinationMethod = true; // New flag to await user's choice of combination method
+                } else {
+                    awaitingPromptCombination = false;
+                    addMessage("assistant", "Prompt combination canceled.");
+                }
+            } else if (awaitingCombinationMethod) {
+                // Handle user's choice of combination method
+                if (message.toLowerCase().includes('library')) {
+                    awaitingCombinationMethod = false;
+                    addMessage("assistant", "Please select a prompt from the prompt library to combine with the current prompt.");
+                    promptLibrary.style.display = 'block'; // Show prompt library for selection
+                } else if (message.toLowerCase().includes('own')) {
+                    awaitingCombinationMethod = false;
+                    addMessage("assistant", "Please input your own prompt to combine with the current prompt.");
+                    awaitingUserPrompt = true; // New flag to await user's own prompt input
+                } else {
+                    awaitingCombinationMethod = false;
+                    addMessage("assistant", "Invalid choice. Prompt combination canceled.");
+                }
+            } else if (awaitingUserPrompt) {
+                // Handle user's own prompt input
+                awaitingUserPrompt = false;
+                const userPrompt = message;
+                addMessage("assistant", `Combining with your prompt: "${userPrompt}"`);
+                combineAndGenerateImage(finalPrompt, userPrompt);
+            } else if (awaitingImageExplanation) {
+                handleImageExplanation(message);
+            } else if (awaitingFollowupResponse && selectedPrompt) {
+                handlePromptFollowup(message);
+            } else if (finalPrompt) {
+                handleDirectPromptModification(message);
+            } else if (directImageGenerationCheckbox.checked) {
+                // Direct image generation if the checkbox is checked
+                const conversationHistory = messages
+                    .map((msg) => `${msg.role}: ${msg.content}`)
+                    .join('\n');
+                const prompt = `Based on the user's input "${message}" and our conversation "${conversationHistory}", generate a highly detailed and visually stunning image. Ensure the prompt incorporates vibrant and harmonious colors, diverse textures (smooth, rough, glossy), a blend of geometric and organic shapes, dynamic lighting with clear shadows and highlights, a strong sense of depth and perspective, and a well-defined artistic style, such as abstract or realism, to achieve exceptional graphical brilliance.`;
+                addMessage("assistant", `Quick Mode Active`, true);
+                generateAndDisplayImage(prompt);
+            } else if (dynamicChatActive || dynamicChatQuestionCount < 6) {
+                handleDynamicChat(message);
+            }
+            userInput.value = '';
+            hideLoader();
+        }
+    }
+
+    async function interpretResponse(userResponse) {
+        const positiveResponses = ["yes", "ok", "sure", "affirmative", "yeah", "yep", "of course"];
+        const negativeResponses = ["no", "don't", "no need", "negative", "nah", "nope"];
+    
+        const normalizedResponse = userResponse.toLowerCase().trim();
+    
+        if (positiveResponses.includes(normalizedResponse)) {
+            return 'yes';
+        } else if (negativeResponses.includes(normalizedResponse)) {
+            return 'no';
+        } else {
+            // Use LLM to interpret ambiguous responses
+            const prompt = `You are an assistant that interprets user responses. Determine if the following response is affirmative (yes) or negative (no): "${userResponse}"`;
+            const interpretation = await callAzureOpenAI(
+                [
+                    { role: "system", content: "You are skilled at interpreting user responses." },
+                    { role: "user", content: prompt },
+                ],
+                50,
+                0.5
+            );
+            if (interpretation.toLowerCase().includes("yes")) {
+                return 'yes';
+            } else {
+                return 'no';
+            }
+        }
+    }
+
+    async function combinePrompts(originalPrompt, selectedPrompt) {
+        const prompt = `You are an assistant that combines two prompts into a single meaningful and cohesive description for image generation. Original Prompt: "${originalPrompt}" Selected Prompt: "${selectedPrompt}" Please combine these prompts into one detailed and coherent description that retains key elements from both prompts.`;
+        return await callAzureOpenAI(
+            [
+                { role: "system", content: "You are skilled at combining prompts for image generation." },
+                { role: "user", content: prompt },
+            ],
+            300,
+            0.7
+        ) || "Failed to combine prompts.";
+    }
   
     async function handleImageExplanation(message) {  
         const modifiedPrompt = await modifyPromptWithLLM(finalPrompt, message);  
@@ -279,17 +370,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         }  
     }  
   
-    async function generateAndDisplayImage(prompt) {  
-        showLoader();  
-        const imageUrl = await generateImage(prompt);  
-        hideLoader();  
-        if (imageUrl && !imageUrl.includes("Failed")) {  
-            addMessage("assistant", `Generated Image:`);  
-            createImageCard(imageUrl);  
-        } else {  
-            addMessage("assistant", "Bad request.");  
-        }  
-    }  
+    async function generateAndDisplayImage(prompt) {
+        showLoader();
+        const imageUrl = await generateImage(prompt);
+        hideLoader();
+        if (imageUrl && !imageUrl.includes("Failed")) {
+            addMessage("assistant", `Generated Image:`);
+            createImageCard(imageUrl);
+            // Ask user if they want to combine the current prompt with a prompt from the library only if not asked before
+            if (!hasAskedPromptCombination) {
+                awaitingPromptCombination = true;
+                hasAskedPromptCombination = true; // Set the flag to true after asking the question
+                addMessage("assistant", "Do you want to combine the current prompt with a prompt from the prompt library? (yes/no)");
+            }
+        } else {
+            addMessage("assistant", "Bad request.");
+        }
+    }
+    
+    promptLibrary.style.display = 'block'; // Show the prompt library for selection  
   
     async function fetchAndDisplayRecommendations(question) {  
         if (showRecommendationsCheckbox.checked) {  
@@ -838,28 +937,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadPrompts();  
 });  
 
-    // Get modal and close button
-    const infoModal = document.getElementById("info-modal");
-    const closeInfoBtn = document.querySelector("#info-modal .close");
-    const openInfoBtn = document.getElementById("info-button");
-
-    // Open modal when the info button is clicked
-    if (openInfoBtn) {
-        openInfoBtn.addEventListener("click", function () {
-            infoModal.style.display = "block";
-        });
+ // Function to toggle the info modal
+function toggleInfoModal() {
+    const infoModal = document.getElementById('info-modal');
+    if (infoModal.style.display === 'block' || infoModal.style.display === '') {
+        infoModal.style.display = 'none';
+    } else {
+        infoModal.style.display = 'block';
     }
+}
 
-    // Close modal when the close button is clicked
-    if (closeInfoBtn) {
-        closeInfoBtn.addEventListener("click", function () {
-            infoModal.style.display = "none";
-        });
-    }
-
-    // Close modal when clicking outside of modal content
-    window.addEventListener("click", function (event) {
-        if (event.target === infoModal) {
-            infoModal.style.display = "none";
-        }
-    });
+// Add event listener to the info button
+const infoButton = document.getElementById('info-button');
+infoButton.addEventListener('click', toggleInfoModal);
